@@ -1,0 +1,306 @@
+show procedures LIKE 'create_transient_permanent_tables%';
+show procedures LIKE 'STREAM_TASK_PER_TABLE%';
+show procedures LIKE 'SNOWPIPE_PER_TABLE%';
+show procedures LIKE 'TRUNCATE_OVERWRITE_TABLES%';
+show procedures LIKE 'TRUNC_LOAD_RAW_TABLE%';
+
+
+
+USE ROLE PROD_TR_SYS_ADMIN;
+
+---------------------------------------------------------CREATE TRANSIENT STG AND PERMANENT MAIN TABLE --------------------------------------------------------------------------
+
+create or replace procedure prod_db.access_policy.create_transient_permanent_tables(TABNAME varchar, EXT_STG_NAME varchar, FILE_FORMAT_NAME varchar, SOURCE_TYPE varchar)
+returns varchar
+language javascript
+comment='Creates a transient and a permanent table for a table name as parameter'
+execute as caller
+
+as
+$$
+    var stmt = "create transient table STG_"+TABNAME+" using template ( select  array_agg(object_construct(*)) from table( infer_schema(  location=>'@"+EXT_STG_NAME+"\/"+SOURCE_TYPE+"\/"+TABNAME+"\/'"+", file_format=>'"+FILE_FORMAT_NAME+"')) )";
+    var crt_stmt = snowflake.createStatement( {sqlText: stmt} );
+    var result_set1 = crt_stmt.execute();
+    
+    var stmt = "create  table "+TABNAME+" like STG_"+TABNAME;
+    var crt_stmt = snowflake.createStatement( {sqlText: stmt} );
+    var result_set1 = crt_stmt.execute();
+    return "Stage table: STG_"+TABNAME+" and Permanent Table: "+TABNAME+" created"
+
+$$;
+
+//grant usage on  procedure prod_db.access_policy.create_transient_permanent_tables(varchar,varchar,varchar,varchar) to role  ZZ_DEV_DB_ENT_RAW_SFULL;
+//grant usage on  procedure prod_db.access_policy.create_transient_permanent_tables(varchar,varchar,varchar,varchar) to role  DEV_TR_DEVOPS;
+//grant usage on  procedure prod_db.access_policy.create_transient_permanent_tables(varchar,varchar,varchar,varchar) to role  ZZ_PROD_DB_ENT_RAW_SFULL;
+//grant usage on  procedure prod_db.access_policy.create_transient_permanent_tables(varchar,varchar,varchar,varchar) to role  PROD_TR_DEVOPS;
+
+--------------------------------------------- TRANSIENT STG AND PERMANENT MAIN TABLE END-----------------------------------------------------------------------
+
+---------------------------------------------------------CREATE STREAMS AND TASKS ----------------------------------------------------------------------------------------
+
+create or replace procedure prod_db.access_policy.STREAM_TASK_PER_TABLE(DB_NAME VARCHAR,SCHEMA_NAME VARCHAR,TAB_NAME VARCHAR)
+RETURNS VARCHAR
+LANGUAGE JAVASCRIPT
+COMMENT='Creates a stream and task for each staging table'
+EXECUTE AS CALLER
+AS
+$$
+result="Success : ";
+
+  //  var stmt = "grant usage on database "+ UTIL_DB_NAME+" to role  ZZ_"+DB_NAME+"_"+SCHEMA_NAME+"_SFULL";
+  //  var crt_stmt = snowflake.createStatement( {sqlText: stmt} );
+  //  var result_set1 = crt_stmt.execute();
+
+  //  var stmt = "grant usage on schema "+UTIL_DB_NAME+"."+UTIL_DB_SNOW_SCHEMA+" to role ZZ_"+DB_NAME+"_"+SCHEMA_NAME+"_SFULL";
+  //  var crt_stmt = snowflake.createStatement( {sqlText: stmt} );
+  //  var result_set1 = crt_stmt.execute();
+    
+  //  var stmt = "grant usage on  procedure "+UTIL_DB_NAME+"."+UTIL_DB_SNOW_SCHEMA+".TRUNCATE_OVERWRITE_TABLES(varchar,varchar,varchar) to role ZZ_"+DB_NAME+"_"+SCHEMA_NAME+"_SFULL";
+ //   var crt_stmt = snowflake.createStatement( {sqlText: stmt} );
+   // var result_set1 = crt_stmt.execute();
+    
+    var stmt = "create or replace stream "+SCHEMA_NAME+"_STG_"+TAB_NAME+"_STREAM"+" on table "+ DB_NAME+"."+SCHEMA_NAME+".STG_"+TAB_NAME+" append_only = true"; 
+    var crt_stmt = snowflake.createStatement( {sqlText: stmt} );
+    var result_set1 = crt_stmt.execute();
+    result+="Stream: "+SCHEMA_NAME+"_STG_"+TAB_NAME+"_STREAM" +" created ";
+    
+    var tsk_stmt = "create or replace task "+SCHEMA_NAME+"_STG_"+TAB_NAME+"_TASK"+" schedule='1 minute' when SYSTEM$STREAM_HAS_DATA('"+SCHEMA_NAME+"_STG_"+TAB_NAME+"_STREAM"+"') 	as CALL prod_db.access_policy.TRUNCATE_OVERWRITE_TABLES('"+DB_NAME+"' ,'"+SCHEMA_NAME+"' ,'"+TAB_NAME+"' ) "; 
+    var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+    var result_set1 = tsk_crt_stmt.execute();
+    
+    return "Task: "+SCHEMA_NAME+"_STG_"+TAB_NAME+"_TASK"+" created";
+$$
+;
+//grant usage on  procedure prod_db.access_policy.STREAM_TASK_PER_TABLE( varchar,  varchar,  varchar,varchar,varchar) to role dev_tr_devops;
+//grant usage on  procedure prod_db.access_policy.STREAM_TASK_PER_TABLE( varchar,  varchar,  varchar,varchar,varchar) to role prod_tr_devops;
+//grant usage on  procedure prod_db.access_policy.STREAM_TASK_PER_TABLE( varchar,  varchar,  varchar,varchar,varchar) to role ZZ_DEV_DB_ENT_RAW_SFULL;
+//grant usage on  procedure prod_db.access_policy.STREAM_TASK_PER_TABLE( varchar,  varchar,  varchar,varchar,varchar) to role ZZ_PROD_DB_ENT_RAW_SFULL;
+
+
+---------------------------------------------------------CREATE STREAMS AND TASKS END-----------------------------------------------------------------------------------------------------
+
+
+---------------------------------------------------------CREATE PIPE SCRIPTS-----------------------------------------------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE prod_db.access_policy.SNOWPIPE_PER_TABLE
+("DB_NAME" VARCHAR(16777216), "SCHEMA_NAME" VARCHAR(16777216), "TAB_NAME" VARCHAR(16777216), "EXT_STG_NAME" VARCHAR(16777216), "FILE_TYPE" VARCHAR(16777216), "FILE_FORMAT_NAME" VARCHAR(16777216), SOURCE_TYPE varchar)
+RETURNS VARCHAR(16777216)
+LANGUAGE JAVASCRIPT
+COMMENT='Creates snowpipe for a table using table name, file type and file_format name as parameters'
+EXECUTE AS CALLER
+AS $$
+    var stmt = "create or replace pipe " +SCHEMA_NAME+"_"+TAB_NAME+"_"+"PIPE"+" auto_ingest=true as  copy into "+DB_NAME+"."+SCHEMA_NAME+".STG_"+TAB_NAME+" from @"+EXT_STG_NAME+"\/"+SOURCE_TYPE+"\/"+TAB_NAME+"\/"+ " PATTERN  = '.*\."+FILE_TYPE+"$' FILE_FORMAT = '"+FILE_FORMAT_NAME+"'    MATCH_BY_COLUMN_NAME =  CASE_INSENSITIVE"; 
+    var crt_stmt = snowflake.createStatement( {sqlText: stmt} );
+    var result_set1 = crt_stmt.execute();
+    
+    
+    
+    var stmt = "alter pipe "+SCHEMA_NAME+"_"+TAB_NAME+"_"+"PIPE"+" refresh";
+    var crt_stmt = snowflake.createStatement( {sqlText: stmt} );
+    var result_set1 = crt_stmt.execute();
+    
+    return "Pipe: "+SCHEMA_NAME+"_"+TAB_NAME+"_"+"PIPE"+" created and refreshed";
+    
+$$;
+
+alter procedure TRUNC_LOAD_RAW_TABLE(varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar) rename to TRUNC_LOAD_RAW_TABLE_BACKUP_14FEB22;
+
+
+------------------------------------------------------------CREATE PIPE SCRIPTS END----------------------------------------------------------------------------------------------
+
+------------------------------------------------------------TRUNCATE OVERWRITE TABLES--------------------------------------------------------------------------------------------
+CREATE OR replace PROCEDURE prod_db.access_policy.TRUNCATE_OVERWRITE_TABLES(DB_NAME VARCHAR,SCHEMA_NAME VARCHAR,TAB_NAME VARCHAR) 
+RETURNS VARCHAR
+LANGUAGE JAVASCRIPT
+COMMENT='To truncate permanent table, swap data from stg table and truncate the stg_table'
+EXECUTE AS CALLER
+AS
+$$
+result="Success: ";
+
+var tsk_stmt = "USE SCHEMA "+DB_NAME+"."+SCHEMA_NAME; 
+var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+var result_set1 = tsk_crt_stmt.execute();
+quote="\"";
+var tsk_stmt = "select listagg(column_name,'\",\"') from information_schema.columns where TABLE_SCHEMA = '"+SCHEMA_NAME+"' AND table_name='"+TAB_NAME+"' order by ordinal_position"; 
+
+//var tsk_stmt = "select listagg(column_name,'\",\"') from information_schema.columns";  
+//var tsk_stmt += "WHERE TABLE_SCHEMA = " + SCHEMA_NAME;
+//var tsk_stmt += "AND table_name = " + TAB_NAME ;
+
+var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+var result_set1 = tsk_crt_stmt.execute();
+while (result_set1.next())  
+ {
+    colList = result_set1.getColumnValue(1);
+    }
+    colList=colList.toString();
+    colList=(quote.concat(colList)).concat(quote);
+    try {
+        var tsk_stmt = "select system$pipe_status('"+DB_NAME+"."+SCHEMA_NAME+"."+SCHEMA_NAME+"_"+TAB_NAME+"_"+"PIPE')"; 
+        var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+        var result_set1 = tsk_crt_stmt.execute();
+        while (result_set1.next())  {
+        col1 = result_set1.getColumnValue(1);
+        }
+        var obj = JSON.parse(col1);
+        var filesPending = parseInt(obj["pendingFileCount"]);
+        if(filesPending === 0)
+        {
+        
+				var tsk_stmt = "INSERT OVERWRITE INTO "+DB_NAME+"."+SCHEMA_NAME+"."+TAB_NAME+" ("+colList+") "+"  select "+colList+" from "+SCHEMA_NAME+"_STG_"+TAB_NAME+"_STREAM"; 
+				var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+				var result_set1 = tsk_crt_stmt.execute();
+                
+                var tsk_stmt =  "TRUNCATE TABLE "+DB_NAME+"."+SCHEMA_NAME+".STG_"+TAB_NAME; 
+				var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+				var result_set1 = tsk_crt_stmt.execute();
+				result+=DB_NAME+"."+SCHEMA_NAME+".STG_"+TAB_NAME+" truncated";
+                return result;	
+        
+        }
+        else {
+        while (filesPending > 0) {
+            var tsk_stmt = "call system$wait(1, 'MINUTES')"; 
+            var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+            var result_set1 = tsk_crt_stmt.execute();
+            
+            var tsk_stmt = "select system$pipe_status('"+DB_NAME+"."+SCHEMA_NAME+"."+SCHEMA_NAME+"_"+TAB_NAME+"_"+"PIPE')"; 
+            var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+            var result_set1 = tsk_crt_stmt.execute();
+            while (result_set1.next())  {
+                col1 = result_set1.getColumnValue(1);
+            }
+            var obj = JSON.parse(col1);
+            var filesPending = parseInt(obj["pendingFileCount"]);
+			if (filesPending === 0) {
+            
+                     
+            
+				var tsk_stmt = "INSERT OVERWRITE INTO "+DB_NAME+"."+SCHEMA_NAME+"."+TAB_NAME+" ("+colList+") "+"  select "+colList+" from "+SCHEMA_NAME+"_STG_"+TAB_NAME+"_STREAM";
+				var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+				var result_set1 = tsk_crt_stmt.execute();
+				
+				var tsk_stmt =  "TRUNCATE TABLE "+DB_NAME+"."+SCHEMA_NAME+".STG_"+TAB_NAME; 
+				var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+				var result_set1 = tsk_crt_stmt.execute();
+				result+=DB_NAME+"."+SCHEMA_NAME+".STG_"+TAB_NAME+" truncated";
+				return result;	
+			} else 
+			{
+			continue;
+			}
+		}
+        
+}
+    }
+    
+    catch (err) {
+        result = "FAILED: Code: " + err.code + "\\\\\\\\n State: " + err.state;
+        result += "\\\\\\\\n Message: " + err.message;
+        result += "\\\\\\\\nStack Trace:\\\\\\\\n" + err.stackTraceTxt;
+        return result;
+    }
+
+$$
+;
+//grant usage on procedure TRUNCATE_OVERWRITE_TABLES(varchar,varchar,varchar) to  role  ZZ_DEV_DB_ENT_RAW_SFULL;
+//grant usage on procedure TRUNCATE_OVERWRITE_TABLES(varchar,varchar,varchar) to role  DEV_TR_DEVOPS;
+//grant usage on procedure TRUNCATE_OVERWRITE_TABLES(varchar,varchar,varchar) to role  ZZ_PROD_DB_ENT_RAW_SFULL;
+//grant usage on procedure TRUNCATE_OVERWRITE_TABLES(varchar,varchar,varchar) to role  PROD_TR_DEVOPS;
+
+------------------------------------------------------------TRUNCATE OVERWRITE TABLES END----------------------------------------------------------------------------------------
+
+
+
+------------------------------------------------------------TRUNCATE_LOAD_TABLE_WRAPPER----------------------------------------------------------------------------------------
+create or replace procedure prod_db.access_policy.TRUNC_LOAD_RAW_TABLE(DB_NAME VARCHAR,SCHEMA_NAME VARCHAR,TAB_NAME VARCHAR, EXT_STG_NAME VARCHAR, FILE_TYPE VARCHAR, FILE_FORMAT_NAME VARCHAR, EXEC_ROLE VARCHAR, SOURCE_TYPE varchar)
+RETURNS VARCHAR
+LANGUAGE JAVASCRIPT
+COMMENT='Creates table and truncates and loads everytime using snowpipe and task'
+EXECUTE AS CALLER
+AS $$
+result="Success: ";
+        
+    try {    
+        var tsk_stmt =  "USE ROLE "+ EXEC_ROLE; 
+        var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+        var result_set1 = tsk_crt_stmt.execute();
+        
+        var tsk_stmt =  "USE SCHEMA "+DB_NAME+"."+SCHEMA_NAME; 
+        var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+        var result_set1 = tsk_crt_stmt.execute();
+        
+        var stmt = snowflake.createStatement({
+        sqlText: 'call prod_db.access_policy.create_transient_permanent_tables(:1, :2,:3,:4)',
+        binds: [TAB_NAME, EXT_STG_NAME,FILE_FORMAT_NAME,SOURCE_TYPE]
+    });
+        var result_set = stmt.execute();
+        result+="Transient and Permanent Table Created. "
+        
+        var stmt = snowflake.createStatement({    sqlText: 'call  prod_db.access_policy.STREAM_TASK_PER_TABLE(:1, :2,:3)', 
+        binds: [DB_NAME, SCHEMA_NAME, TAB_NAME]   });    
+        var result_set = stmt.execute();
+        result+="Stream and Tasks Created. ";
+        
+       // var stmt = snowflake.createStatement({
+       // sqlText: 'call prod_db.access_policy.SNOWPIPE_PER_TABLE(:1, :2,:3,:4,:5,:6,:7)',
+       // binds: [DB_NAME, SCHEMA_NAME,TAB_NAME,EXT_STG_NAME,FILE_TYPE,FILE_FORMAT_NAME,SOURCE_TYPE]
+   // });    
+       // var result_set = stmt.execute();
+       // result+="Snowpipe is created. ";
+        
+        var tsk_stmt =  "alter task "+SCHEMA_NAME+"_STG_"+TAB_NAME+"_TASK resume"; 
+        var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+        var result_set1 = tsk_crt_stmt.execute();
+        
+        result+=" Task is started";
+        return result;
+        }
+        
+    catch (err) {
+        result = "FAILED: Code: " + err.code + "\\\\\\\\n State: " + err.state;
+        result += "\\\\\\\\n Message: " + err.message;
+        result += "\\\\\\\\\\\\\\\\nStack Trace:\\\\\\\\\\\\\\\\n" + err.stackTraceTxt;
+        return result;
+    }
+        $$
+		;
+        
+        
+//grant usage on  procedure prod_db.access_policy.TRUNC_LOAD_RAW_TABLE(varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar) to role  ZZ_DEV_DB_ENT_RAW_SFULL;
+//grant usage on  procedure prod_db.access_policy.TRUNC_LOAD_RAW_TABLE(varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar) to role  DEV_TR_DEVOPS;
+//grant usage on  procedure prod_db.access_policy.TRUNC_LOAD_RAW_TABLE(varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar) to role  ZZ_PROD_DB_ENT_RAW_SFULL;
+//grant usage on  procedure prod_db.access_policy.TRUNC_LOAD_RAW_TABLE(varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar,varchar) to role  PROD_TR_DEVOPS;
+
+
+
+------------------------------------------------------------TRUNCATE_LOAD_TABLE_WRAPPER----------------------------------------------------------------------------------------
+T_AUTH_MAT_TABLE
+T_KF_AUTH_MAT
+T_SINGLE_AUTH_MAT
+USER_PARAMETERS
+
+use schema prod_db.access_policy;
+use schema dev_db.access_policy;
+USE ROLE PROD_TR_SYS_ADMIN;
+
+show file formats;
+
+create or replace file format FF_ACCESS_POLICY_PARQUET like devdb.access_policy.FF_ACCESS_POLICY_PARQUET;
+
+TRUNC_LOAD_RAW_TABLE(DB_NAME VARCHAR,SCHEMA_NAME VARCHAR,TAB_NAME VARCHAR, EXT_STG_NAME VARCHAR, FILE_TYPE VARCHAR, FILE_FORMAT_NAME VARCHAR, UTIL_DB_NAME VARCHAR,UTIL_DB_SNOW_SCHEMA VARCHAR, EXEC_ROLE VARCHAR, SOURCE_TYPE varchar)
+call prod_db.access_policy.TRUNC_LOAD_RAW_TABLE('PROD_DB','ACCESS_POLICY','T_AUTH_MAT_TABLE',varchar,'parquet',varchar,varchar,varchar,varchar,varchar)
+
+show stages;
+
+ALTER STAGE "DEV_DB"."ACCESS_POLICY"."ACCESS_POLICY_EXT_STG" SET STORAGE_INTEGRATION = EIM_SNOW_DEV_STO_INT URL = 's3://eim-snowflake-dev';
+
+create or replace stage "PROD_DB"."ACCESS_POLICY"."ACCESS_POLICY_EXT_STG"
+  storage_integration = EIM_SNOW_PROD_STO_INT
+  url = 's3://eim-snowflake-prod'
+ 
+show integrations;
+desc integration EIM_SNOW_PROD_STO_INT;
+
+
+
