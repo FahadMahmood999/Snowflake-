@@ -1,0 +1,80 @@
+
+CREATE OR REPLACE PROCEDURE "DETECT_SCHEMA_CHANGE"("SOURCE_DB_NAME" VARCHAR(16777216), "SOURCE_SCHEMA_NAME" VARCHAR(16777216), "TARGET_DB_NAME" VARCHAR(16777216), "TARGET_SCHEMA_NAME" VARCHAR(16777216), "TABLE_LIST" VARCHAR(16777216))
+RETURNS VARCHAR(16777216)
+LANGUAGE JAVASCRIPT
+COMMENT='Check for new columns and datatype changes'
+EXECUTE AS CALLER
+AS 
+$$
+result="Success: ";
+var stmt = `with source as (
+                select '"'||table_name||'"' table_name,
+                    ordinal_position,
+                    '"'||column_name||'"' column_name,
+                    data_type,
+                    character_maximum_length,
+                    numeric_precision,
+                    numeric_scale,
+                    datetime_precision
+                from `+SOURCE_DB_NAME+`.information_schema.columns 
+                where table_catalog = '`+SOURCE_DB_NAME+`' and table_schema = '`+SOURCE_SCHEMA_NAME+`' and table_name in ('`+TABLE_LIST+`')
+                ),
+                target as (
+                select '"'||table_name||'"' table_name,
+                    '"'||column_name||'"' column_name
+                from `+TARGET_DB_NAME+`.information_schema.columns
+                where table_catalog = '`+TARGET_DB_NAME+`' and table_schema = '`+TARGET_SCHEMA_NAME+`' and table_name in (SUBSTR('`+TABLE_LIST+`',6))
+                )
+
+                select '"'||substr(replace(source.table_name,'"'),6)||'"' table_name,
+                    source.column_name,
+                    source.data_type,
+                    source.character_maximum_length,
+                    source.numeric_precision,
+                    source.numeric_scale,
+                    source.datetime_precision
+                from source
+                left join target on substr(replace(source.table_name,'"'),6) = replace(target.table_name,'"')  and source.column_name = target.column_name
+                where target.column_name is null
+                order by source.table_name, source.ordinal_position;`;
+var crt_stmt = snowflake.createStatement( {sqlText: stmt} );
+var columns_missing_in_target = crt_stmt.execute();
+try {
+    while(columns_missing_in_target.next()) {
+    var tab_name=columns_missing_in_target.getColumnValue("TABLE_NAME");
+    var tab_name_c=tab_name.toString();
+    var tab_name_var=tab_name_c.replace("\"","").replace("\"","");
+    var col_name=columns_missing_in_target.getColumnValue("COLUMN_NAME");
+    var col_name_var=col_name.replace("\"","").replace("\"","");
+
+    var alter_stmt=`alter table `+TARGET_DB_NAME+`.`+TARGET_SCHEMA_NAME+`.\"`+tab_name_var+`\"
+            add column \"`+col_name_var+`\" ${columns_missing_in_target.getColumnValue("DATA_TYPE")}${
+                (() => {
+                    if (columns_missing_in_target.getColumnValue("NUMERIC_PRECISION") !== null && columns_missing_in_target.getColumnValue("NUMERIC_SCALE") !== null) {
+                      return   ` (${columns_missing_in_target.getColumnValue("NUMERIC_PRECISION")},${columns_missing_in_target.getColumnValue("NUMERIC_SCALE")})`
+                    } else if (columns_missing_in_target.getColumnValue("CHARACTER_MAXIMUM_LENGTH")) {
+                        return ` (${columns_missing_in_target.getColumnValue("CHARACTER_MAXIMUM_LENGTH")})`
+                    } else if (columns_missing_in_target.getColumnValue("DATETIME_PRECISION")) {
+                        return ` (${columns_missing_in_target.getColumnValue("DATETIME_PRECISION")})`
+                    } else {
+                        return ""
+                    }
+                })()
+            }`;
+            
+       // return alter_stmt    
+         var crt_alter_stmt=snowflake.createStatement( {sqlText: alter_stmt} );
+         var results_alter=crt_alter_stmt.execute();
+         return result+" Table Altered, Column "+col_name_var+" added."
+    };
+      return "No change required. Tables have same structure"
+    }
+catch (err) {
+        result = "FAILED: Code: " + err.code + "\\\\\\\\n State: " + err.state;
+        result += "\\\\\\\\n Message: " + err.message;
+        result += "\\\\\\\\nStack Trace:\\\\\\\\n" + err.stackTraceTxt;
+        return result;
+    }
+
+$$
+;
