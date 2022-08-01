@@ -1,0 +1,71 @@
+
+USE SCHEMA PROD_DB.ACCESS_POLICY;
+
+USE ROLE PROD_TR_SYS_ADMIN;
+
+
+select count(*) from T_KF_AUTH_MAT; --10771
+
+
+alter task ACCESS_POLICY_T_SINGLE_AUTH_MAT_TASK resume;
+alter pipe ACCESS_POLICY_T_SINGLE_AUTH_MAT_PIPE set pipe_execution_paused=false;
+
+
+"PROD_DB"."ACCESS_POLICY"."T_KF_AUTH_MAT"
+
+select * from T_KF_AUTH_MAT_DUMMY;
+
+
+CREATE TABLE T_KF_AUTH_MAT_DUMMY
+(FILE_NAME varchar,
+NUMBER_OF_ROWS number,
+LOAD_DATE timestamp DEFAULT CURRENT_TIMESTAMP());
+
+
+create stream ACCESS_POLICY_T_KF_AUTH_MAT_STREAM on table T_KF_AUTH_MAT_DUMMY append_only=true;
+
+drop stream ACCESS_POLICY_T_KF_AUTH_MAT_STREAM;
+
+list @ACCESS_POLICY_EXT_STG/sapbw/T_KF_AUTH_MAT/
+
+create or replace pipe ACCESS_POLICY_T_KF_AUTH_MAT_PIPE auto_ingest=true as 
+copy into PROD_DB.ACCESS_POLICY.T_KF_AUTH_MAT_DUMMY from(SELECT $1,$2,CURRENT_TIMESTAMP As LOAD_DATE from @ACCESS_POLICY_EXT_STG/sapbw/T_KF_AUTH_MAT/  )
+PATTERN  = '.*.fin$'
+FILE_FORMAT=( TYPE = 'CSV');
+
+grant all on pipe ACCESS_POLICY_T_KF_AUTH_MAT_PIPE to role PROD_TR_DEVOPS;
+grant all on pipe ACCESS_POLICY_T_KF_AUTH_MAT_PIPE to role PROD_TR_SYS_ADMIN;
+
+
+
+
+
+
+
+create or replace task ACCESS_POLICY_T_KF_AUTH_MAT_TASK
+schedule='1 MINUTE'
+when SYSTEM$STREAM_HAS_DATA('ACCESS_POLICY_T_KF_AUTH_MAT_STREAM')
+as
+call UTIL_DB.SNOWCONFIG.TRUNCATE_OVERWRITE_CTL('PROD_DB','ACCESS_POLICY','T_KF_AUTH_MAT','ACCESS_POLICY_EXT_STG','sapbw/T_KF_AUTH_MAT','parquet','FF_ACCESS_POLICY_PARQUET');
+
+
+--alter task ACCESS_POLICY_T_SINGLE_AUTH_MAT_TASK suspend;
+
+alter task ACCESS_POLICY_T_KF_AUTH_MAT_TASK resume;
+
+select system$pipe_status('ACCESS_POLICY_T_KF_AUTH_MAT_PIPE');
+
+select * from T_KF_AUTH_MAT_DUMMY;
+
+select * from ACCESS_POLICY_T_KF_AUTH_MAT_STREAM;
+
+
+
+show tasks like '%ACCESS_POLICY_T_KF_AUTH_MAT_TASK%';
+
+select *
+  from table(information_schema.task_history(
+    scheduled_time_range_start=>dateadd('hour',-1,current_timestamp()),
+    result_limit => 10,
+    task_name=>'ACCESS_POLICY_T_KF_AUTH_MAT_TASK'));
+
