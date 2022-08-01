@@ -1,0 +1,73 @@
+CREATE OR REPLACE PROCEDURE PROD_DB.ECC_LOAD_MANAGEMENT."ECC_RUN_MERGE"("DB_NAME" VARCHAR(16777216), "SCHEMA_NAME_SRC" VARCHAR(16777216), "SCHEMA_NAME_TGT" VARCHAR(16777216), "EXECUTE_IMMEDIATE" BOOLEAN, "ENABLE_TASKS" BOOLEAN)
+RETURNS VARCHAR(16777216)
+LANGUAGE SQL
+EXECUTE AS CALLER
+AS '
+    declare
+--    //replace ECC_LOAD_MANAGEMENT_ECC_MERGE_CONFIG_STREAM with ECC_LOAD_MANAGEMENT_ECC_MERGE_CONFIG_STREAM
+        task_config_statement string;
+        cur_config_delete cursor for select task_name from ECC_LOAD_MANAGEMENT_ECC_MERGE_CONFIG_STREAM where metadata$action = ''DELETE'';
+        cur_config_create cursor for select task_name, warehouse, task_schedule, task_comment, array_to_string(tables, '','') as tables from ECC_LOAD_MANAGEMENT_ECC_MERGE_CONFIG_STREAM where metadata$action = ''INSERT'';
+        
+        execute_task_statement string;
+        cur_task_execution cursor for select task_name from ecc_merge_config;
+        
+    begin
+    
+        open cur_config_delete;
+        for row_var in cur_config_delete do
+            -- it might be that we update the task name so we will drop the old task
+            -- if we''ve deleted something from the config table drop the task
+            task_config_statement := ''drop task if exists "'' || row_var.task_name || ''";'';
+            execute immediate task_config_statement;
+        end for;
+        
+        open cur_config_create;
+        for row_var in cur_config_create do
+            task_config_statement := ''create or replace task "'' || row_var.task_name || ''" warehouse = '' || row_var.warehouse || '' schedule = '''''' || row_var.task_schedule || '''''' comment = '''''' || row_var.task_comment || '''''' as call ecc_merge_pipeline(''''''|| db_name ||'''''',''''''|| schema_name_src ||'''''',''''''|| schema_name_tgt ||'''''',strtok_to_array('''''' || row_var.tables || '''''', '''',''''));'';
+            execute immediate task_config_statement;
+            
+            if ( enable_tasks ) then
+                task_config_statement := ''alter task "'' || row_var.task_name || ''" resume;'';
+                execute immediate task_config_statement;
+            end if;
+
+        end for;
+        
+        if ( execute_immediate ) then
+            open cur_task_execution;
+            for row_var in cur_task_execution do
+                execute_task_statement := ''execute task "'' || row_var.task_name || ''";'';
+                execute immediate execute_task_statement;
+            end for;
+        end if;
+        
+        -- now we can clear the stream
+        execute immediate ''create or replace temp table empty_stream as select * from ECC_LOAD_MANAGEMENT_ECC_MERGE_CONFIG_STREAM where 1 = 0;'';
+        
+        return ''Done'';
+    end;
+';
+
+
+
+
+CREATE OR REPLACE PROCEDURE PROD_DB.ECC_LOAD_MANAGEMENT."ECC_MERGE_PIPELINE"("DB_NAME" VARCHAR(16777216), "SCHEMA_NAME_SRC" VARCHAR(16777216), "SCHEMA_NAME_TGT" VARCHAR(16777216), "ARR_TABLES" ARRAY)
+RETURNS VARCHAR(16777216)
+LANGUAGE SQL
+EXECUTE AS CALLER
+AS '
+    declare
+        ins_statement string;
+        res resultset default (select replace(value,''"'') as v from table(flatten( :arr_tables )));
+        c1 cursor for res;
+    begin
+        for table_var in c1 do
+            ins_statement := ''insert into test values ('''''' || table_var.v || '''''');'';
+            ins_statement := ''call util_db.snowconfig.dedup_merge(''''''||DB_NAME||'''''',''''''||SCHEMA_NAME_SRC||'''''',''''''||DB_NAME||'''''',''''''||SCHEMA_NAME_TGT||'''''','''''' || table_var.v || '''''','''''' || table_var.v || '''''',''''GLCHANGETIME'''');'';
+            --ins_statement := ''call util_db.snowconfig.dedup_merge(''''PROD_DB'''',''''ECC_PRTHREE_RAW'''',''''PROD_DB'''',''''ECC_PRTHREE'''','''''' || table_var.v || '''''','''''' || table_var.v || '''''',''''GLCHANGETIME'''');'';
+            execute immediate ins_statement;
+        end for;        
+        return ''Done'';
+    end;
+';
