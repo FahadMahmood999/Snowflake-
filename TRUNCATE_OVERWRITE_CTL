@@ -1,0 +1,171 @@
+CREATE OR REPLACE PROCEDURE UTIL_DB.SNOWCONFIG."TRUNCATE_OVERWRITE_CTL_DRAFT"("DB_NAME" VARCHAR(16777216), "SCHEMA_NAME" VARCHAR(16777216), "TABLE_NAME" VARCHAR(16777216), "EXT_STG_NAME" VARCHAR(16777216), "SOURCEPATH" VARCHAR(16777216), "FILE_TYPE" VARCHAR(16777216), "FILE_FORMAT_NAME" VARCHAR(16777216))
+RETURNS VARIANT
+LANGUAGE JAVASCRIPT
+EXECUTE AS CALLER
+AS 
+$$
+var output_array = [];
+var v_step=0;
+
+str2=("'$1:'||'").concat(quote)+"'||column_name||'".concat(quote)+"'||'::'||case when data_type='TEXT' then 'VARCHAR' else data_type end"
+var tsk_stmt = "select listagg("+str2+",',' ) within group (order by ordinal_position ) from information_schema.columns where TABLE_SCHEMA = '"+SCHEMA_NAME+"' AND table_name='"+TABLE_NAME+"' ";
+
+var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );var result_set1 = tsk_crt_stmt.execute();
+
+while(result_set1.next()) {
+colList=result_set1.getColumnValue(1);
+
+}
+
+var col_stmt = "select listagg( column_name,'\\\\",\\\\"' ) within group (order by ordinal_position ) from information_schema.columns where TABLE_SCHEMA = '"+SCHEMA_NAME+"' AND table_name='"+TABLE_NAME+"' ";
+
+var crt_col_stmt = snowflake.createStatement( {sqlText: col_stmt} );
+var result_setcol = crt_col_stmt.execute();
+
+while(result_setcol.next()) {
+colListTbl=result_setcol.getColumnValue(1);
+
+}
+colListTbl=colListTbl.toString();
+colListTbl=(quote.concat(colListTbl)).concat(quote);
+
+
+////helper funtion for logging
+function log ( msg ) {
+output_array.push(msg)
+}
+
+try{
+v_step=1;
+
+var create_clause = "Truncate table  "+DB_NAME+"."+SCHEMA_NAME+"."+TABLE_NAME;
+var create_stmt1 = snowflake.createStatement({sqlText: create_clause});
+var createexc = create_stmt1.execute();
+
+var mysql_command =`copy into `+DB_NAME+`.`+SCHEMA_NAME+`.`+TABLE_NAME+` ( `+colListTbl+` ) from (select `+colList+` from @`+EXT_STG_NAME+`/`+SOURCEPATH+`)
+PATTERN = '.*\\\\\\\\.`+FILE_TYPE+`$'
+FILE_FORMAT = '`+FILE_FORMAT_NAME+`'
+ ;`
+
+
+////// just logging
+log('sql_copy_stmt: ' + mysql_command);
+var stmt = snowflake.createStatement( {sqlText: mysql_command} );
+var result = stmt.execute();
+var queryText=stmt.getSqlText();
+result.next();
+output_array.push(result.getColumnValue(1))
+
+var create_clause = "CREATE OR REPLACE TEMP TABLE "+DB_NAME+"."+SCHEMA_NAME+".TEMP_"+TABLE_NAME+" AS SELECT * FROM "+DB_NAME+"."+SCHEMA_NAME+"."+SCHEMA_NAME+"_"+TABLE_NAME+"_STREAM";
+var create_stmt1 = snowflake.createStatement({sqlText: create_clause});
+var createexc = create_stmt1.execute();
+
+var drop_clause = "drop TABLE "+DB_NAME+"."+SCHEMA_NAME+".TEMP_"+TABLE_NAME+"";
+var drop_stmt = snowflake.createStatement({sqlText: drop_clause});
+var drop_res = drop_stmt.execute();
+
+
+return output_array;
+
+
+}
+
+catch(err){
+ret = "Failed at Step " + v_step
+ret = "FAILED: Code: " + err.code + "\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\n State: " + err.state;
+ret += "\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\n Message: " + err.message;
+ret += "\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\nStack Trace:\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\n" + err.stackTraceTxt;
+return ret;
+}
+
+
+
+$$
+;
+
+-----------------------------------Updated code on top of Sachi's code KNA1 column name issue --------------------------
+CREATE OR REPLACE PROCEDURE "UTIL_DB"."SNOWCONFIG"."TRUNCATE_OVERWRITE_CTL_DRAFT"("DB_NAME" VARCHAR(16777216), "SCHEMA_NAME" VARCHAR(16777216), "TABLE_NAME" VARCHAR(16777216), "EXT_STG_NAME" VARCHAR(16777216), "SOURCEPATH" VARCHAR(16777216), "FILE_TYPE" VARCHAR(16777216), "FILE_FORMAT_NAME" VARCHAR(16777216))
+RETURNS VARCHAR
+LANGUAGE JAVASCRIPT
+EXECUTE AS CALLER
+AS 
+$$
+var output_array = [];
+var v_step=0;
+quote="\"";
+str2=("'$1:'||'").concat(quote)+"'||column_name||'".concat(quote)+"'||'::'||case when data_type='TEXT' then 'VARCHAR' else data_type end"
+
+
+var tsk_stmt = "select listagg("+str2+",',' ) within group (order by ordinal_position ) from information_schema.columns where TABLE_SCHEMA = '"+SCHEMA_NAME+"' AND table_name='"+TABLE_NAME+"' ";
+
+var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+var result_set1 = tsk_crt_stmt.execute();
+
+while(result_set1.next()) {
+colList=result_set1.getColumnValue(1);
+
+}
+
+
+var col_stmt = "select listagg( column_name,'\",\"' ) within group (order by ordinal_position ) from information_schema.columns where TABLE_SCHEMA = '"+SCHEMA_NAME+"' AND table_name='"+TABLE_NAME+"' ";
+
+var crt_col_stmt = snowflake.createStatement( {sqlText: col_stmt} );
+var result_setcol = crt_col_stmt.execute();
+
+while(result_setcol.next()) {
+colListTbl=result_setcol.getColumnValue(1);
+
+}
+colListTbl=colListTbl.toString();
+colListTbl=(quote.concat(colListTbl)).concat(quote);
+
+try{
+v_step=1;
+
+  var create_clause = "Truncate table  "+DB_NAME+"."+SCHEMA_NAME+"."+TABLE_NAME;
+  var create_stmt1 = snowflake.createStatement({sqlText: create_clause});
+  var createexc = create_stmt1.execute();
+
+var mysql_command =`copy into `+DB_NAME+`.`+SCHEMA_NAME+`.`+TABLE_NAME+` ( `+colListTbl+` ) from (select `+colList+` from @`+EXT_STG_NAME+`/`+SOURCEPATH+`)
+PATTERN = '.*.`+FILE_TYPE+`$'
+FILE_FORMAT = '`+FILE_FORMAT_NAME+`'
+;`
+
+//return mysql_command;
+var stmt = snowflake.createStatement( {sqlText: mysql_command} );
+var result = stmt.execute();
+var queryText=stmt.getSqlText();
+result.next();
+output_array.push(result.getColumnValue(1))
+
+  var create_clause = "CREATE OR REPLACE TEMP TABLE "+DB_NAME+"."+SCHEMA_NAME+".TEMP_"+TABLE_NAME+" AS SELECT * FROM "+DB_NAME+"."+SCHEMA_NAME+"."+SCHEMA_NAME+"_"+TABLE_NAME+"_STREAM";
+  var create_stmt1 = snowflake.createStatement({sqlText: create_clause});
+  var createexc = create_stmt1.execute();
+
+  var drop_clause = "drop TABLE "+DB_NAME+"."+SCHEMA_NAME+".TEMP_"+TABLE_NAME+"";
+  var drop_stmt = snowflake.createStatement({sqlText: drop_clause});
+var drop_res = drop_stmt.execute();
+
+
+return output_array;
+
+
+}
+
+catch(err){
+ret = "Failed at Step " + v_step
+ret = "FAILED: Code: " + err.code + \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\n State:  + err.state;
+ret += \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\n Message:  + err.message;
+ret += \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\nStack Trace:\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\n + err.stackTraceTxt;
+return ret;
+}
+
+$$
+
+;
+
+
+CALL DEV_DB.ENT_RAW.TRUNCATE_OVERWRITE_CTL_DRAFT('PROD_DB','ENT_RAW','KNA1_TEST','ENT_RAW_EXT_STG','sapecc/KNA1','parquet','ENT_RAW_PARQUET');
+
+CALL UTIL_DB.SNOWCONFIG.TRUNCATE_OVERWRITE_CTL_DRAFT('PROD_DB','ENT_RAW','KNA1_TEST','ENT_RAW_EXT_STG','sapecc/KNA1','parquet','ENT_RAW_PARQUET');
+
