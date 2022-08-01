@@ -1,0 +1,28 @@
+CREATE OR REPLACE PROCEDURE UTIL_DB.SNOWCONFIG."SP_TABLE_LIKE_CREATION"(DB_NAME VARCHAR(16777216),SCHEMA_NAME_SRC VARCHAR(16777216),SCHEMA_NAME_TGT VARCHAR(16777216) )
+RETURNS VARCHAR(16777216)
+LANGUAGE JAVASCRIPT
+COMMENT=' Create table for Entire Schema using the LIKE keyword'
+EXECUTE AS CALLER
+AS 
+$$
+result="Success: ";
+var tsk_stmt = "SELECT '\"'||TABLE_NAME||'\"' FROM "+DB_NAME+".INFORMATION_SCHEMA.TABLES where TABLE_TYPE = 'BASE TABLE' AND  TABLE_SCHEMA='"+SCHEMA_NAME_SRC+"' ";
+var tsk_crt_stmt = snowflake.createStatement( {sqlText: tsk_stmt} );
+var result_set1 = tsk_crt_stmt.execute();
+
+while(result_set1.next()) {
+tblList=result_set1.getColumnValue(1);
+
+var ddl_stmt =" CREATE TABLE "+DB_NAME+"."+SCHEMA_NAME_TGT+"."+tblList+"  IF NOT EXISTS LIKE "+DB_NAME+"."+SCHEMA_NAME_SRC+"."+tblList+" ";
+
+var create_ddl_stmt = snowflake.createStatement({sqlText: ddl_stmt});
+var createexc = create_ddl_stmt.execute();
+
+
+}
+//return ddl_stmt
+return result
+
+
+$$
+;
