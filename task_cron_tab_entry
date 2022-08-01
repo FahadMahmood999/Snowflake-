@@ -1,0 +1,20 @@
+
+/* This step of scheduling task in a day with 5 hr gap of interval will help in reducing the merge time while stream will build up for LARGE tables..
+INSERT INTO PROD_DB.ECC_LOAD_MANAGEMENT.ECC_MERGE_CONFIG
+  select 'ECC_PRFOUR_RAW_Z00C_T134T_KONP',
+  'PROD_WH_ELT','USING CRON 40 1,6,11,15,20 * * * CET',
+  'Task for merging Z00C_T134T AND Z00C_KONP',
+  parse_json('["Z00C_T134T","Z00C_KONP"]'),'ECC_PRFOUR_RAW','TRUE' ;
+
+
+/* This will run the task 20 mins 2 am
+
+20-- mins
+2 -- hrs 
+
+INSERT INTO PROD_DB.ECC_LOAD_MANAGEMENT.ECC_MERGE_CONFIG
+  select 'ECC_PRFOUR_RAW_Z00C_T134T_KONP_SCHEDUL2',
+  'PROD_WH_VIPP_TASK','USING CRON 20 2 * * * CET',
+  'Task for merging Z00C_T134T AND Z00C_KONP',
+  parse_json('["Z00C_T134T","Z00C_KONP"]'),'ECC_PRFOUR_RAW','TRUE' ;
+
