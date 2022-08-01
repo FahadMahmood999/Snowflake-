@@ -1,0 +1,92 @@
+
+select get_ddl('view', 'V_MERGED_Z00C_A002');
+
+CALL "SP_VIEW_MERGED_NEW"('PROD_DB','ECC_PRFOUR_RAW','ECC_PRFOUR','Z00C_A002','Z00C_A002','GLCHANGETIME');
+
+
+CREATE OR REPLACE PROCEDURE "SP_VIEW_MERGED_NEW"
+("DB_NAME" VARCHAR(16777216), "SRC_SCHEMA_NAME" VARCHAR(16777216),"TGT_SCHEMA_NAME" VARCHAR(16777216),"SRC_TBL" VARCHAR(16777216),"TGT_TBL" VARCHAR(16777216), "TIMESTAMP_COL" VARCHAR(16777216))
+RETURNS VARCHAR(16777216)
+LANGUAGE JAVASCRIPT
+COMMENT='SP will generate dynamic View from target table and streams'
+EXECUTE AS CALLER
+AS
+$$
+var join_col =[];
+var part_col =[];
+result="Success: ";
+
+//To get the information of columns  from Information schema for target table
+
+var sel_sql = "select listagg('\"'||column_name||'\"',',')  within group (order by ordinal_position ) from "+DB_NAME+".information_schema.columns WHERE TABLE_SCHEMA = '"+SRC_SCHEMA_NAME+"' AND TABLE_NAME = '"+ SRC_TBL+"' ";        
+var sel_stmet = snowflake.createStatement({sqlText: sel_sql});        
+var sel_res = sel_stmet.execute();
+
+while (sel_res.next()){
+//update_col.push('tgt.'+sel_res.getColumnValue(1) + ' = ' + 'src.' + sel_res.getColumnValue(1));
+colListTbl=sel_res.getColumnValue(1);
+}
+
+//return colListTbl
+
+
+var Col_als_sql = "select listagg('tgt.'||'\"'||column_name||'\"',',')  within group (order by ordinal_position ) from "+DB_NAME+".information_schema.columns WHERE TABLE_SCHEMA = '"+TGT_SCHEMA_NAME+"' AND TABLE_NAME = '"+ TGT_TBL+"' ";        
+var Col_als_stmt = snowflake.createStatement({sqlText: Col_als_sql});        
+var sel_col_res = Col_als_stmt.execute();
+
+while (sel_col_res.next()){
+colListAlsTbl=sel_col_res.getColumnValue(1);
+}
+
+
+//return colListAlsTbl
+
+var sel_pk_sql=" SHOW PRIMARY KEYS IN "+DB_NAME+"."+TGT_SCHEMA_NAME+"."+TGT_TBL+" ";
+var sel_stmet_pk = snowflake.createStatement({sqlText: sel_pk_sql});        
+var sel_res_pk = sel_stmet_pk.execute();
+
+var sel_pk_rs=" select '\"'||COLUMN_NAME||'\"' FROM TABLE (RESULT_SCAN (LAST_QUERY_ID())) ";
+var sel_stmet_pk_rs= snowflake.createStatement({sqlText: sel_pk_sql});
+var sel_res_pk_f= sel_stmet_pk_rs.execute();
+
+while (sel_res_pk_f.next()){
+part_col.push(sel_res_pk_f.getColumnValue(5));
+join_col.push('d.'+sel_res_pk_f.getColumnValue(5) + ' = ' + 'tgt.' + sel_res_pk_f.getColumnValue(5));
+}
+
+fin_join_col = join_col.join(' AND ');
+fin_part_col = part_col.join(',');
+
+//return fin_part_col
+//return fin_join_col
+
+var Col_delta_sql = "select listagg('d.'||'\"'||column_name||'\"',',')  within group (order by ordinal_position ) from "+DB_NAME+".information_schema.columns WHERE TABLE_SCHEMA = '"+SRC_SCHEMA_NAME+"' AND TABLE_NAME = '"+SRC_TBL+"' ";        
+var Col_delta_stmt = snowflake.createStatement({sqlText: Col_delta_sql});        
+var sel_col_delta_res = Col_delta_stmt.execute();
+
+while (sel_col_delta_res.next()){
+colListAlsdeltaTbl=sel_col_delta_res.getColumnValue(1);
+}
+
+//return colListAlsdeltaTbl
+
+
+//var create_View_clause= "CREATE OR REPLACE VIEW "+DB_NAME+"."+SRC_SCHEMA_NAME+".V_MERGED_"+TGT_TBL+" AS WITH STRM_DELTA AS ( SELECT "+colListTbl+" FROM "+DB_NAME+"."+SRC_SCHEMA_NAME+"."+SRC_SCHEMA_NAME+"_"+SRC_TBL+"_STREAM  QUALIFY 1 = ROW_NUMBER() OVER (PARTITION BY "+fin_part_col+" ORDER BY "+TIMESTAMP_COL+" desc )) "; 
+
+//var create_View_clause= "CREATE OR REPLACE VIEW "+DB_NAME+"."+TGT_SCHEMA_NAME+".V_MERGED_"+TGT_TBL+" AS WITH STRM_DELTA AS ( SELECT "+colListTbl+" FROM "+DB_NAME+"."+SRC_SCHEMA_NAME+"."+SRC_SCHEMA_NAME+"_"+SRC_TBL+"_STREAM WHERE GLDELFLAG <> 'D' QUALIFY 1 = ROW_NUMBER() OVER (PARTITION BY "+fin_part_col+" ORDER BY "+TIMESTAMP_COL+" desc ))  SELECT "+colListAlsTbl+" FROM "+DB_NAME+"."+TGT_SCHEMA_NAME+"."+TGT_TBL+" tgt WHERE tgt.GLDELFLAG <> 'D' AND NOT EXISTS (SELECT 1 from STRM_DELTA D where "+fin_join_col+") UNION ALL SELECT "+colListAlsdeltaTbl+" FROM STRM_DELTA D"; 
+
+var create_View_clause= "CREATE OR REPLACE VIEW "+DB_NAME+"."+TGT_SCHEMA_NAME+".V_MERGED_"+TGT_TBL+" AS SELECT * FROM ( WITH STRM_DELTA AS ( SELECT "+colListTbl+" FROM "+DB_NAME+"."+SRC_SCHEMA_NAME+"."+SRC_TBL+" CHANGES(INFORMATION => APPEND_ONLY) AT(STREAM => '"+DB_NAME+"."+SRC_SCHEMA_NAME+"."+SRC_SCHEMA_NAME+"_"+SRC_TBL+"_STREAM') QUALIFY 1 = ROW_NUMBER() OVER (PARTITION BY "+fin_part_col+" ORDER BY "+TIMESTAMP_COL+" desc )) SELECT "+colListAlsTbl+" FROM "+DB_NAME+"."+TGT_SCHEMA_NAME+"."+TGT_TBL+" tgt WHERE NOT EXISTS (SELECT 1 from STRM_DELTA D where "+fin_join_col+") UNION ALL SELECT "+colListAlsdeltaTbl+" FROM STRM_DELTA D ) A where GLDELFLAG <> 'D' "; 
+                                                                                                                                                                                                                                                                                                                                         
+
+//var create_View_clause= "CREATE OR REPLACE VIEW "+DB_NAME+"."+TGT_SCHEMA_NAME+".V_MERGED_"+TGT_TBL+" AS SELECT * FROM ( WITH STRM_DELTA AS ( SELECT "+colListTbl+" FROM "+DB_NAME+"."+SRC_SCHEMA_NAME+"."+SRC_SCHEMA_NAME+"_"+SRC_TBL+"_STREAM  QUALIFY 1 = ROW_NUMBER() OVER (PARTITION BY "+fin_part_col+" ORDER BY "+TIMESTAMP_COL+" desc ))  SELECT "+colListAlsTbl+" FROM "+DB_NAME+"."+TGT_SCHEMA_NAME+"."+TGT_TBL+" tgt WHERE NOT EXISTS (SELECT 1 from STRM_DELTA D where "+fin_join_col+") UNION ALL SELECT "+colListAlsdeltaTbl+" FROM STRM_DELTA D ) A where GLDELFLAG <> 'D' "; 
+
+
+var create_stmt_view = snowflake.createStatement({sqlText: create_View_clause});
+var createexc = create_stmt_view.execute();
+
+//return create_View_clause
+
+return "View: V_MERGED_"+TGT_TBL+" created";
+
+$$
+;
