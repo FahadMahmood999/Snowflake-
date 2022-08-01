@@ -1,0 +1,98 @@
+select get_ddl('schema','ENT_RAW', TRUE);
+');
+select get_ddl('tasks','task_name)
+
+
+select get_ddl('procedure', 'COPY_ECC_TBL_PROC(VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR)');
+
+list @ENT_RAW_EXT_STG/sapecc/AUSP
+
+select $1 from @ENT_RAW_EXT_STG/sapecc/AUSP/part-678590c3-b007-4816-8329-08a6e42f3b7b-1.parquet
+(file_format => 'ENT_RAW_PARQUET');
+
+select count($1) from @ENT_RAW_EXT_STG/sapecc/AUSP/part-f97a8e6c-94f8-490f-8b4e-8860434d2e3a-1.parquet
+(file_format => 'ENT_RAW_PARQUET');
+
+
+/* Create mutiple views statement using one query */
+SELECT DISTINCT 'CREATE OR REPLACE VIEW V_' || TABLE_NAME || ' AS SELECT * FROM ' || TABLE_NAME AS VIEW_CREATION
+FROM PROD_DB.information_schema.COLUMNS
+WHERE TABLE_SCHEMA='ECC_PRTHREE_RAW' ;
+
+//How to get he drop staement of all task;
+
+show tasks;
+SELECT 'DROP TASK ' || "name" || ';' FROM  table(result_scan(last_query_id()));
+
+
+show tasks like '%ECC_PRTWO%';
+SELECT "name"  FROM  table(result_scan(last_query_id()))
+where TO_DATE("created_on")='2022-07-06';
+
+
+
+---Checking task history.
+select *
+  from table(information_schema.task_history(
+    scheduled_time_range_start=>dateadd('hour',-1,current_timestamp()),
+    result_limit => 10,
+    task_name=>'ENT_RAW_STG_AUSP_TASK_F'));
+
+
+
+
+delete  from (
+select task_name,row_number() over(partition by task_name order by 1) rn from "PROD_PERSONAL_DB"."SNEHAL_NIRANJAN_MORE"."ECC_TEST"
+where task_name='ECC_PRFOUR_RAW_Z00C_A897_A914'
+)t 
+where t.rn>1;
+
+
+use schema dev_db.access_policy;
+use schema prod_db.access_policy;
+USE ROLE PROD_TR_SYS_ADMIN;
+
+show procedures ;
+show streams;
+
+show pipes like '%VIPP_RAW_T_AUTH_MAT_TABLE_PIPE%';
+show pipes like '%VIPP_RAW_T_KF_AUTH_MAT_PIPE%';
+show pipes like '%VIPP_RAW_T_SINGLE_AUTH_MAT_PIPE%';
+show pipes like '%VIPP_RAW_USER_PARAMETERS_PIPE%';
+
+desc pipe VIPP_RAW_T_AUTH_MAT_TABLE_PIPE;
+
+
+alter pipe ENT_RAW_AUSP_FIN_PIPE refresh;
+select system$pipe_status( 'ACCESS_POLICY_USER_PARAMETERS_PIPE');
+
+ALTER PIPE VIPP_RAW_USER_PARAMETERS_PIPE set pipe_execution_paused=true;
+
+
+
+show tasks like '%T_AUTH_MAT_TABLE%';
+show tasks like '%STG_T_KF_AUTH_MAT_TASK%';
+show tasks like  '%STG_T_SINGLE_AUTH_MAT_TASK%';
+show tasks like '%STG_USER_PARAMETERS_TASK%';
+
+desc task ACCESS_POLICY_STG_T_AUTH_MAT_TABLE_TASK
+
+alter task ACCESS_POLICY_STG_T_AUTH_MAT_TABLE_TASK suspend;
+alter task  ACCESS_POLICY_STG_T_KF_AUTH_MAT_TASK resume;
+alter task  ACCESS_POLICY_STG_T_SINGLE_AUTH_MAT_TASK resume;
+alter task  ACCESS_POLICY_STG_USER_PARAMETERS_TASK resume;
+
+
+--select * from table(information_schema.copy_history(table_name=>'STG_T_AUTH_MAT_TABLE', start_time=> dateadd(hours, -1, current_timestamp())));
+
+select *
+  from table(information_schema.task_history(
+    scheduled_time_range_start=>dateadd('hour',-1,current_timestamp()),
+    result_limit => 10,
+    task_name=>'ACCESS_POLICY_STG_USER_PARAMETERS_TASK'))
+    where QUERY_ID IS NOT NULL;----- Pass query Id not null to check the current task status in running state
+
+
+Select TABLE_NAME from PROD_DB.INFORMATION_SCHEMA.columns
+where TABLE_NAME LIKE '%ZCONF%'; ECC_PRFOUR_RAW
+
