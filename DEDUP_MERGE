@@ -1,0 +1,99 @@
+CREATE OR REPLACE PROCEDURE UTIL_DB.SNOWCONFIG."DEDUP_MERGE"("SRC_DB_NAME" VARCHAR(16777216), "SRC_SCHEMA_NAME" VARCHAR(16777216), "TGT_DB_NAME" VARCHAR(16777216), "TGT_SCHEMA_NAME" VARCHAR(16777216), "SRC_TABLE" VARCHAR(16777216), "TGT_TABLE" VARCHAR(16777216), "TIMESTAMP_COL" VARCHAR(16777216))
+RETURNS VARCHAR(16777216)
+LANGUAGE JAVASCRIPT
+COMMENT='SP will generate dynamic merge statement for ECC Datavard table'
+EXECUTE AS CALLER
+AS 
+$$
+var insert_col = [];
+var insert_val = [];
+var update_col = [];
+var join_col =[];
+var part_col =[];
+var output_array = [];
+result="Success: ";
+
+//To get the information of columns  from Information schema for all the non-key columns corresponding to source table
+
+var sel_sql = "select '\"'||COLUMN_NAME||'\"' FROM "+SRC_DB_NAME+".INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '"+SRC_SCHEMA_NAME+"' AND TABLE_NAME = '"+ SRC_TABLE +"' AND IS_NULLABLE='YES' ORDER BY ORDINAL_POSITION";        
+var sel_stmet = snowflake.createStatement({sqlText: sel_sql});        
+var sel_res = sel_stmet.execute();
+
+while (sel_res.next()){
+update_col.push('tgt.'+sel_res.getColumnValue(1) + ' = ' + 'src.' + sel_res.getColumnValue(1));
+
+}
+
+fin_update_col = update_col.join(',');
+
+//return fin_update_col
+
+
+//To get the information of columns from Information schema for key columns 
+
+//var sel_pk_sql = "select '\"'||COLUMN_NAME||'\"' FROM "+SRC_DB_NAME+".INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '"+SRC_SCHEMA_NAME+"' AND TABLE_NAME = '"+ SRC_TABLE +"' AND IS_NULLABLE='NO'  ORDER BY ORDINAL_POSITION";        
+//var sel_stmet_pk = snowflake.createStatement({sqlText: sel_pk_sql});        
+//var sel_res_pk = sel_stmet_pk.execute();
+
+//while (sel_res_pk.next()){
+//part_col.push(sel_res_pk.getColumnValue(1));
+//join_col.push('tgt.'+sel_res_pk.getColumnValue(1) + ' = ' + 'src.' + sel_res_pk.getColumnValue(1));
+//}
+
+
+
+var sel_pk_sql=" SHOW PRIMARY KEYS IN "+SRC_DB_NAME+"."+SRC_SCHEMA_NAME+".\""+SRC_TABLE+"\" ";
+var sel_stmet_pk = snowflake.createStatement({sqlText: sel_pk_sql});        
+var sel_res_pk = sel_stmet_pk.execute();
+
+//return sel_res_pk
+
+var sel_pk_rs=" select '\"'||COLUMN_NAME||'\"' FROM TABLE (RESULT_SCAN (LAST_QUERY_ID())) ";
+var sel_stmet_pk_rs= snowflake.createStatement({sqlText: sel_pk_sql});
+var sel_res_pk_f= sel_stmet_pk_rs.execute();
+
+while (sel_res_pk_f.next()){
+part_col.push(sel_res_pk_f.getColumnValue(5));
+join_col.push('tgt.'+sel_res_pk_f.getColumnValue(5) + ' = ' + 'src.' + sel_res_pk_f.getColumnValue(5));
+}
+
+fin_join_col = join_col.join(' AND ');
+fin_part_col = part_col.join(',');
+
+//return fin_part_col
+
+//To get the information from Information schema for both non-key and  key columns 
+
+var sel_bth_sql = "select '\"'||COLUMN_NAME||'\"' FROM "+SRC_DB_NAME+".INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '"+SRC_SCHEMA_NAME+"' AND TABLE_NAME = '"+ SRC_TABLE +"' ORDER BY ORDINAL_POSITION";        
+var sel_stmet_bth = snowflake.createStatement({sqlText: sel_bth_sql});        
+var sel_res_bth = sel_stmet_bth.execute();
+
+while (sel_res_bth.next()){
+insert_col.push(sel_res_bth.getColumnValue(1));
+insert_val.push('src.'+sel_res_bth.getColumnValue(1));
+}
+
+fin_insert_col = insert_col.join(',');
+fin_insert_val = insert_val.join(',');
+
+//return fin_insert_val
+
+
+
+//var mrg_sql = "MERGE INTO  "+TGT_DB_NAME+"."+TGT_SCHEMA_NAME+"."+TGT_TABLE+" tgt \nUSING "+SRC_DB_NAME+"."+SRC_SCHEMA_NAME+"."+SRC_TABLE+" src ON "+fin_join_col+" \nWHEN MATCHED THEN UPDATE SET "+fin_update_col+"  \nWHEN NOT MATCHED THEN INSERT (" + fin_insert_col + ")  VALUES (" + fin_insert_val + ")  ";
+
+var mrg_sql ="MERGE INTO  "+TGT_DB_NAME+"."+TGT_SCHEMA_NAME+".\""+TGT_TABLE+"\" tgt \nUSING ( SELECT "+fin_insert_col+" from "+SRC_DB_NAME+"."+SRC_SCHEMA_NAME+".\""+SRC_SCHEMA_NAME+"_"+SRC_TABLE+"_STREAM\" QUALIFY 1 = ROW_NUMBER() OVER (PARTITION BY "+fin_part_col+" ORDER BY "+TIMESTAMP_COL+" desc ) ) src ON "+fin_join_col+" \nWHEN MATCHED THEN UPDATE SET "+fin_update_col+"  \nWHEN NOT MATCHED THEN INSERT (" + fin_insert_col + ")  VALUES (" + fin_insert_val + ")  ";
+ 
+
+
+var create_mrg_stmt = snowflake.createStatement({sqlText: mrg_sql});
+var createexc = create_mrg_stmt.execute();
+createexc.next();
+output_array.push(createexc.getColumnValue(1))
+return result
+//return mrg_sql
+
+//return output_array;
+
+$$
+;
