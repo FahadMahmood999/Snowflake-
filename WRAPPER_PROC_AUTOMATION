@@ -1,0 +1,62 @@
+create or replace procedure WRAPPER_PROC_AUTOMATION_DRAFT
+//(SRC_DB_NAME VARCHAR,SRC_SCHEMA_NAME VARCHAR,TGT_DB_NAME VARCHAR, TGT_SCHEMA_NAME VARCHAR,SRC_TABLE VARCHAR,TGT_TABLE VARCHAR,TIMESTAMP_COL varchar,EXT_STG_NAME VARCHAR,SOURCE_PATH VARCHAR )
+(SRC_DB_NAME VARCHAR,SRC_SCHEMA_NAME VARCHAR,TGT_DB_NAME VARCHAR, TGT_SCHEMA_NAME VARCHAR,SRC_TABLE VARCHAR,TGT_TABLE VARCHAR,TIMESTAMP_COL varchar,TABLE_LIST VARCHAR,EXT_STG_NAME VARCHAR,SOURCE_PATH VARCHAR )
+
+RETURNS VARCHAR
+LANGUAGE JAVASCRIPT
+COMMENT=' This procedure will be used to call the DDL schema change,Dedup merge and Copy into External stage'
+EXECUTE AS CALLER
+AS
+$$
+result="Success: ";
+
+var return_rows = [];
+try 
+{    
+
+var stmt = snowflake.createStatement({
+sqlText: 'call util_db.snowconfig.DETECT_SCHEMA_CHANGE(:1, :2,:3,:4,:8)',
+binds: [SRC_DB_NAME, SRC_SCHEMA_NAME,TGT_DB_NAME,TGT_SCHEMA_NAME,TABLE_LIST]});
+var result_set = stmt.execute();
+result+="table altered. ";
+
+
+//Calling the Dynamic Merge SP
+var stmt = snowflake.createStatement({sqlText: 'call util_db.snowconfig.DEDUP_MERGE(:1, :2,:3,:4,:5,:6,:7)',binds: [SRC_DB_NAME, SRC_SCHEMA_NAME,TGT_DB_NAME,TGT_SCHEMA_NAME,SRC_TABLE,TGT_TABLE,TIMESTAMP_COL]});
+var result_set = stmt.execute();
+result+="Merge statement executed . "
+
+//Getting the current_timestamp to append in file name for unloading in S3
+
+var col_stmt="select to_char(current_timestamp(),'yyyymmddhh24miss')";
+var crt_col_stmt = snowflake.createStatement( {sqlText: col_stmt} );
+var result_setcol = crt_col_stmt.execute();
+
+while(result_setcol.next()) {
+time_stmp_str=result_setcol.getColumnValue(1);
+}
+time_stmp_str=time_stmp_str.toString();
+//return colListTbl
+
+var unload_stmt= `copy into @`+EXT_STG_NAME+`/`+SOURCE_PATH+`/`+SRC_TABLE+`_`+time_stmp_str+` from (select * from `+SRC_DB_NAME+`.`+SRC_SCHEMA_NAME+`.`+SRC_SCHEMA_NAME+`_`+SRC_TABLE+`_S3_STREAM) 
+FILE_FORMAT = (type=parquet compression='SNAPPY');`
+
+//return unload_stmt
+var stmt = snowflake.createStatement( {sqlText: unload_stmt} );
+var result_set = stmt.execute();
+result_set.next();
+return_rows.push(result_set.getColumnValue(1))
+
+return result
+
+}
+
+catch (err) {
+        result = "FAILED: Code: " + err.code + "\\\\\\\\n State: " + err.state;
+        result += "\\\\\\\\n Message: " + err.message;
+        result += "\\\\\\\\\\\\\\\\nStack Trace:\\\\\\\\\\\\\\\\n" + err.stackTraceTxt;
+        return result;
+    }
+    
+$$
+;
