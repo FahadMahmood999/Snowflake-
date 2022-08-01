@@ -1,0 +1,37 @@
+//CALL util_db.snowconfig.DYNAMIC_STREAM_ECC_TABLE('PROD_DB','ECC_PRFOUR_RAW','Z00C','COST');
+
+create or replace procedure util_db.snowconfig.DYNAMIC_STREAM_ECC_TABLE(DB_NAME VARCHAR,SCHEMA_NAME VARCHAR,PREFIX VARCHAR,TAB_NAME VARCHAR)
+RETURNS VARCHAR
+LANGUAGE JAVASCRIPT
+COMMENT='Creates a stream for each ECC table'
+EXECUTE AS CALLER
+AS
+$$
+result="Success : ";
+
+try
+{
+var stmt = "create stream if not exists "+DB_NAME+"."+SCHEMA_NAME+"."+SCHEMA_NAME+"_"+PREFIX+"_"+TAB_NAME+"_S3_STREAM on table "+ DB_NAME+"."+SCHEMA_NAME+"."+PREFIX+"_"+TAB_NAME+" append_only = true";
+var crt_stmt = snowflake.createStatement( {sqlText: stmt} );
+var result_set = crt_stmt.execute();
+
+result+="Stream: "+SCHEMA_NAME+"_"+PREFIX+"_"+TAB_NAME+"_S3_STREAM created ";
+
+var stmt1 = "create stream if not exists "+DB_NAME+"."+SCHEMA_NAME+"."+SCHEMA_NAME+"_"+PREFIX+"_"+TAB_NAME+"_STREAM on table "+ DB_NAME+"."+SCHEMA_NAME+"."+PREFIX+"_"+TAB_NAME+" append_only = true show_initial_rows = true";
+var crt_stmt_strm = snowflake.createStatement( {sqlText: stmt1} );
+var result_set_strm = crt_stmt_strm.execute();
+
+result+="Stream: "+SCHEMA_NAME+"_"+PREFIX+"_"+TAB_NAME+"_STREAM created /n and "+SCHEMA_NAME+"_"+PREFIX+"_"+TAB_NAME+"_S3_STREAM created ";
+return result;
+
+}
+catch (err) {
+result = "FAILED: Code: " + err.code + "\\\\\\\\\\\\\\\\n State: " + err.state;
+result += "\\\\\\\\\\\\\\\\n Message: " + err.message;
+result += "\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\nStack Trace:\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\n" + err.stackTraceTxt;
+return result;
+}
+
+$$
+;	
+
